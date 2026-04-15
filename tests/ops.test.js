@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sigmoid, tanh, relu, matmul, addBias, conv1d } from '../src/ops.js';
+import { sigmoid, tanh, relu, matmul, addBias, conv1d, lstmCell } from '../src/ops.js';
 
 describe('sigmoid', () => {
   it('returns 0.5 at x=0', () => {
@@ -87,8 +87,8 @@ describe('conv1d', () => {
   });
 
   it('applies zero padding symmetrically', () => {
-    // input [1,2,3], kernel [1,1,1], pad=1 → padded [0,1,2,3,0], out len = (3+2-3)/1+1 = 3
-    // t=0: 0+1+2 = 3; t=1: 1+2+3 = 6; t=2: 2+3+0 = 5
+    // input [1,2,3], kernel [1,1,1], pad=1 → padded [0,1,2,3,0], outLen = 3
+    // t=0: 0+1+2=3, t=1: 1+2+3=6, t=2: 2+3+0=5
     const input = new Float32Array([1, 2, 3]);
     const weight = new Float32Array([1, 1, 1]);
     const bias = new Float32Array([0]);
@@ -96,5 +96,72 @@ describe('conv1d', () => {
       inChannels: 1, outChannels: 1, kernelSize: 3, stride: 1, padding: 1, inputLength: 3,
     });
     expect(Array.from(out)).toEqual([3, 6, 5]);
+  });
+});
+
+describe('lstmCell (PyTorch gate order [i, f, g, o])', () => {
+  it('with zero state and zero weights, returns zero state', () => {
+    const hiddenSize = 4, inputSize = 2;
+    const x = new Float32Array([0.5, -0.5]);
+    const hPrev = new Float32Array(hiddenSize);
+    const cPrev = new Float32Array(hiddenSize);
+    const { h, c } = lstmCell(x, hPrev, cPrev, {
+      W_ih: new Float32Array(4 * hiddenSize * inputSize),
+      W_hh: new Float32Array(4 * hiddenSize * hiddenSize),
+      b_ih: new Float32Array(4 * hiddenSize),
+      b_hh: new Float32Array(4 * hiddenSize),
+      inputSize, hiddenSize,
+    });
+    // All zeros: gates all = 0. i=f=o=sigmoid(0)=0.5, g=tanh(0)=0.
+    // c = 0.5*0 + 0.5*0 = 0; h = 0.5*tanh(0) = 0.
+    for (let i = 0; i < hiddenSize; i++) {
+      expect(c[i]).toBeCloseTo(0, 10);
+      expect(h[i]).toBeCloseTo(0, 10);
+    }
+  });
+
+  it('accumulates cell state when forget≈1, input≈1, g≈1', () => {
+    const hiddenSize = 1, inputSize = 1;
+    const W_ih = new Float32Array(4);
+    const W_hh = new Float32Array(4);
+    const b_ih = new Float32Array([10, 10, 10, 10]); // huge bias on i,f,g,o
+    const b_hh = new Float32Array(4);
+    let h = new Float32Array(1), c = new Float32Array(1);
+    const x = new Float32Array([0]);
+    for (let step = 0; step < 5; step++) {
+      const out = lstmCell(x, h, c, { W_ih, W_hh, b_ih, b_hh, inputSize, hiddenSize });
+      h = out.h; c = out.c;
+    }
+    // Recurrence with saturating gates, exact: c_t = s * c_{t-1} + s * t, where
+    // s = sigmoid(10) and t = tanh(10). Iterate analytically to match.
+    const s = 1 / (1 + Math.exp(-10));
+    const tg = Math.tanh(10);
+    let cExpected = 0;
+    for (let step = 0; step < 5; step++) cExpected = s * cExpected + s * tg;
+    const hExpected = s * Math.tanh(cExpected);
+    expect(c[0]).toBeCloseTo(cExpected, 5);
+    expect(h[0]).toBeCloseTo(hExpected, 5);
+  });
+
+  it('matches analytical reference for uniform weights', () => {
+    // inputSize=2, hiddenSize=2, W_ih=W_hh=all ones, biases=0.
+    // gate_pre = sum(x) + sum(hPrev) for every gate unit.
+    // With x=(0.3,0.1), hPrev=(0.5,-0.5): sum=0.4+0=0.4.
+    const W_ih = new Float32Array(Array(16).fill(1));
+    const W_hh = new Float32Array(Array(16).fill(1));
+    const b_ih = new Float32Array(8);
+    const b_hh = new Float32Array(8);
+    const x = new Float32Array([0.3, 0.1]);
+    const hPrev = new Float32Array([0.5, -0.5]);
+    const cPrev = new Float32Array([0.2, -0.2]);
+    const { h, c } = lstmCell(x, hPrev, cPrev, {
+      W_ih, W_hh, b_ih, b_hh, inputSize: 2, hiddenSize: 2,
+    });
+    const sig = 1 / (1 + Math.exp(-0.4));
+    const gGate = Math.tanh(0.4);
+    expect(c[0]).toBeCloseTo(sig * 0.2 + sig * gGate, 5);
+    expect(c[1]).toBeCloseTo(sig * -0.2 + sig * gGate, 5);
+    expect(h[0]).toBeCloseTo(sig * Math.tanh(c[0]), 5);
+    expect(h[1]).toBeCloseTo(sig * Math.tanh(c[1]), 5);
   });
 });

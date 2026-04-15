@@ -77,3 +77,47 @@ export function conv1d(input, weight, bias, opts) {
   }
   return out;
 }
+
+/**
+ * Single-timestep LSTM cell with PyTorch gate order [i, f, g, o].
+ *
+ *   gates = W_ih @ x + b_ih + W_hh @ hPrev + b_hh   // shape (4*hidden,)
+ *   i, f, g, o = split(gates, 4 contiguous blocks of hiddenSize)
+ *   c = sigmoid(f) * cPrev + sigmoid(i) * tanh(g)
+ *   h = sigmoid(o) * tanh(c)
+ *
+ * SileroVAD v5's exported weights use PyTorch order (not ONNX [i,o,f,c]),
+ * which is why this function hardcodes [i,f,g,o].
+ */
+export function lstmCell(x, hPrev, cPrev, params) {
+  const { W_ih, W_hh, b_ih, b_hh, inputSize, hiddenSize } = params;
+  const four = 4 * hiddenSize;
+  const gates = new Float32Array(four);
+
+  for (let r = 0; r < four; r++) gates[r] = b_ih[r] + b_hh[r];
+
+  for (let r = 0; r < four; r++) {
+    const base = r * inputSize;
+    let sum = 0;
+    for (let j = 0; j < inputSize; j++) sum += W_ih[base + j] * x[j];
+    gates[r] += sum;
+  }
+  for (let r = 0; r < four; r++) {
+    const base = r * hiddenSize;
+    let sum = 0;
+    for (let j = 0; j < hiddenSize; j++) sum += W_hh[base + j] * hPrev[j];
+    gates[r] += sum;
+  }
+
+  const h = new Float32Array(hiddenSize);
+  const c = new Float32Array(hiddenSize);
+  for (let n = 0; n < hiddenSize; n++) {
+    const i = 1 / (1 + Math.exp(-gates[n]));
+    const f = 1 / (1 + Math.exp(-gates[hiddenSize + n]));
+    const g = Math.tanh(gates[2 * hiddenSize + n]);
+    const o = 1 / (1 + Math.exp(-gates[3 * hiddenSize + n]));
+    c[n] = f * cPrev[n] + i * g;
+    h[n] = o * Math.tanh(c[n]);
+  }
+  return { h, c };
+}
