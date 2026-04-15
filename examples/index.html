@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>silvero-vad-js demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 16px system-ui, -apple-system, sans-serif; padding: 24px; max-width: 640px; margin: auto; }
+    button { padding: 12px 20px; font-size: 16px; border-radius: 6px; border: 1px solid #8888; background: transparent; color: inherit; cursor: pointer; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    .meter-track { height: 24px; background: #8884; border-radius: 4px; overflow: hidden; margin: 16px 0; }
+    .meter-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #4ade80, #ef4444); transition: width 30ms linear; }
+    .log { font: 13px ui-monospace, monospace; white-space: pre-wrap; background: #8881; padding: 12px; border-radius: 6px; max-height: 280px; overflow: auto; }
+    .status { font: 14px ui-monospace, monospace; opacity: 0.7; margin: 8px 0; }
+  </style>
+</head>
+<body>
+  <h1>silvero-vad-js</h1>
+  <p>Pure-JS SileroVAD running in your browser. Works on iOS Safari (where ONNX Runtime WASM is broken).</p>
+
+  <button id="start">Start mic</button>
+  <button id="stop" disabled>Stop</button>
+
+  <div class="status" id="status">Idle.</div>
+  <div class="meter-track"><div class="meter-bar" id="bar"></div></div>
+  <div class="log" id="log"></div>
+
+  <script type="module">
+    import { VADRecorder } from '../src/index.js';
+
+    const log = (msg) => {
+      const el = document.getElementById('log');
+      el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+      el.scrollTop = el.scrollHeight;
+    };
+    const setStatus = (s) => { document.getElementById('status').textContent = s; };
+
+    const recorder = new VADRecorder({
+      weightsBinUrl:      '../weights/silero_vad_v5.bin',
+      weightsManifestUrl: '../weights/silero_vad_v5.manifest.json',
+      workletUrl:         '../src/vad_processor.js',
+      threshold: 0.5,
+      silenceMs: 480,
+    });
+
+    recorder.addEventListener('frame', (e) => {
+      document.getElementById('bar').style.width = `${(e.detail.prob * 100).toFixed(0)}%`;
+    });
+    recorder.addEventListener('speech-start', () => log('🎤 speech started'));
+    recorder.addEventListener('speech-end', (e) => {
+      const sec = (e.detail.audio.length / e.detail.sampleRate).toFixed(2);
+      log(`🛑 speech ended — ${e.detail.audio.length} samples (${sec}s)`);
+    });
+
+    document.getElementById('start').onclick = async () => {
+      try {
+        setStatus('Loading weights + asking for mic permission...');
+        await recorder.start();
+        document.getElementById('start').disabled = true;
+        document.getElementById('stop').disabled = false;
+        setStatus('Listening.');
+        log('mic running at 16kHz');
+      } catch (err) {
+        setStatus('Error.');
+        log('ERROR: ' + err.message);
+        console.error(err);
+      }
+    };
+
+    document.getElementById('stop').onclick = async () => {
+      await recorder.stop();
+      document.getElementById('start').disabled = false;
+      document.getElementById('stop').disabled = true;
+      setStatus('Stopped.');
+      log('mic stopped');
+    };
+  </script>
+</body>
+</html>
