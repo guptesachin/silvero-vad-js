@@ -18,17 +18,20 @@ export function relu(arr) {
 
 /**
  * Matrix multiply: C (aRows x bCols) = A (aRows x aCols) @ B (aCols x bCols).
- * Loop order i,k,j for cache locality on B.
+ * Accumulates each output element in an f64 local (JS Number) and stores to
+ * Float32 only once — matches BLAS-like precision, avoids per-step f32 rounding.
  */
 export function matmul(a, aRows, aCols, b, bCols) {
   const c = new Float32Array(aRows * bCols);
   for (let i = 0; i < aRows; i++) {
-    for (let k = 0; k < aCols; k++) {
-      const aik = a[i * aCols + k];
-      if (aik === 0) continue;
-      for (let j = 0; j < bCols; j++) {
-        c[i * bCols + j] += aik * b[k * bCols + j];
+    const aBase = i * aCols;
+    const cBase = i * bCols;
+    for (let j = 0; j < bCols; j++) {
+      let sum = 0;
+      for (let k = 0; k < aCols; k++) {
+        sum += a[aBase + k] * b[k * bCols + j];
       }
+      c[cBase + j] = sum;
     }
   }
   return c;
@@ -94,23 +97,20 @@ export function lstmCell(x, hPrev, cPrev, params) {
   const four = 4 * hiddenSize;
   const gates = new Float32Array(four);
 
-  for (let r = 0; r < four; r++) gates[r] = b_ih[r] + b_hh[r];
-
+  // Accumulate the full gate preactivation in a local f64 sum, then round once.
   for (let r = 0; r < four; r++) {
-    const base = r * inputSize;
-    let sum = 0;
-    for (let j = 0; j < inputSize; j++) sum += W_ih[base + j] * x[j];
-    gates[r] += sum;
-  }
-  for (let r = 0; r < four; r++) {
-    const base = r * hiddenSize;
-    let sum = 0;
-    for (let j = 0; j < hiddenSize; j++) sum += W_hh[base + j] * hPrev[j];
-    gates[r] += sum;
+    const ihBase = r * inputSize;
+    const hhBase = r * hiddenSize;
+    let sum = b_ih[r] + b_hh[r];
+    for (let j = 0; j < inputSize; j++) sum += W_ih[ihBase + j] * x[j];
+    for (let j = 0; j < hiddenSize; j++) sum += W_hh[hhBase + j] * hPrev[j];
+    gates[r] = sum;
   }
 
-  const h = new Float32Array(hiddenSize);
-  const c = new Float32Array(hiddenSize);
+  // Return state as plain arrays (JS Number = f64) to avoid f32 rounding
+  // every frame — LSTM recurrence amplifies per-step rounding across frames.
+  const h = new Array(hiddenSize);
+  const c = new Array(hiddenSize);
   for (let n = 0; n < hiddenSize; n++) {
     const i = 1 / (1 + Math.exp(-gates[n]));
     const f = 1 / (1 + Math.exp(-gates[hiddenSize + n]));
