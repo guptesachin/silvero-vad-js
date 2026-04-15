@@ -121,3 +121,51 @@ export function lstmCell(x, hPrev, cPrev, params) {
   }
   return { h, c };
 }
+
+/**
+ * 1D reflection padding, matching PyTorch's ReflectionPad1d.
+ * For input [a,b,c,d,e] and pad=2, returns [c,b,a,b,c,d,e,d,c]: boundary
+ * samples appear exactly once; only interior samples are mirrored.
+ * Requires pad < inputLength.
+ */
+export function reflectPad1d(input, pad) {
+  const n = input.length;
+  if (pad === 0) return new Float32Array(input);
+  if (pad >= n) throw new Error(`reflect pad ${pad} >= input length ${n}`);
+  const out = new Float32Array(n + 2 * pad);
+  for (let i = 0; i < pad; i++) out[i] = input[pad - i];         // mirror left (skip boundary)
+  for (let i = 0; i < n; i++) out[pad + i] = input[i];
+  for (let i = 0; i < pad; i++) out[pad + n + i] = input[n - 2 - i]; // mirror right
+  return out;
+}
+
+/**
+ * STFT magnitude via SileroVAD's fused Conv1D basis.
+ *
+ * `basis` has shape (2 * nFreqs, 1, kernelSize), layout: first nFreqs rows
+ * are the cosine (real) kernels, next nFreqs rows are the sine (imag) kernels.
+ * Computes conv1d with stride, splits output into real/imag halves, returns
+ * magnitude = sqrt(real^2 + imag^2) as shape (nFreqs, nFrames).
+ */
+export function stftMagnitude(input, basis, opts) {
+  const { kernelSize, stride, inputLength, nFreqs } = opts;
+  const outLen = Math.floor((inputLength - kernelSize) / stride) + 1;
+  const mag = new Float32Array(nFreqs * outLen);
+
+  // Real kernels at rows [0, nFreqs), imag at [nFreqs, 2*nFreqs).
+  for (let f = 0; f < nFreqs; f++) {
+    const wReBase = f * kernelSize;
+    const wImBase = (nFreqs + f) * kernelSize;
+    for (let t = 0; t < outLen; t++) {
+      let re = 0, im = 0;
+      const inStart = t * stride;
+      for (let k = 0; k < kernelSize; k++) {
+        const v = input[inStart + k];
+        re += basis[wReBase + k] * v;
+        im += basis[wImBase + k] * v;
+      }
+      mag[f * outLen + t] = Math.sqrt(re * re + im * im);
+    }
+  }
+  return mag;
+}

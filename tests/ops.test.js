@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { sigmoid, tanh, relu, matmul, addBias, conv1d, lstmCell } from '../src/ops.js';
+import { sigmoid, tanh, relu, matmul, addBias, conv1d, lstmCell,
+         reflectPad1d, stftMagnitude } from '../src/ops.js';
 
 describe('sigmoid', () => {
   it('returns 0.5 at x=0', () => {
@@ -163,5 +164,55 @@ describe('lstmCell (PyTorch gate order [i, f, g, o])', () => {
     expect(c[1]).toBeCloseTo(sig * -0.2 + sig * gGate, 5);
     expect(h[0]).toBeCloseTo(sig * Math.tanh(c[0]), 5);
     expect(h[1]).toBeCloseTo(sig * Math.tanh(c[1]), 5);
+  });
+});
+
+describe('reflectPad1d', () => {
+  it('mirrors boundary samples, excluding the boundary itself', () => {
+    // PyTorch reflect pad: for [a,b,c,d,e] with pad=2 on each side, result is
+    // [c,b,a,b,c,d,e,d,c]. The boundary samples (a and e) appear only once.
+    const x = new Float32Array([1, 2, 3, 4, 5]);
+    const padded = reflectPad1d(x, 2);
+    expect(Array.from(padded)).toEqual([3, 2, 1, 2, 3, 4, 5, 4, 3]);
+  });
+
+  it('with pad=0 returns a copy unchanged', () => {
+    const x = new Float32Array([1, 2, 3]);
+    const out = reflectPad1d(x, 0);
+    expect(Array.from(out)).toEqual([1, 2, 3]);
+  });
+});
+
+describe('stftMagnitude', () => {
+  it('with a DC-only basis returns the DC component magnitude per frame', () => {
+    // Build a minimal basis buffer: 2 output channels (1 freq bin × 2 for re/im),
+    // kernel=4, 1 input channel. basis[0] = [1,1,1,1] (DC, real), basis[1] = [0,0,0,0] (imag=0).
+    // With nFreqs=1, stftMagnitude should output abs(sum_of_4_samples) per frame.
+    const basis = new Float32Array([
+      1, 1, 1, 1,      // row 0: real DC
+      0, 0, 0, 0,      // row 1: imag DC (zeros)
+    ]);
+    // Input: 8 samples, stride=4, kernel=4 → 2 frames.
+    // Frame 0 samples [1,2,3,4]: real=10, imag=0, mag=10
+    // Frame 1 samples [5,6,7,8]: real=26, imag=0, mag=26
+    const input = new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]);
+    const mag = stftMagnitude(input, basis, {
+      kernelSize: 4, stride: 4, inputLength: 8, nFreqs: 1,
+    });
+    // Output shape (nFreqs=1, nFrames=2)
+    expect(Array.from(mag)).toEqual([10, 26]);
+  });
+
+  it('with pure imag basis returns abs of the imag component', () => {
+    const basis = new Float32Array([
+      0, 0, 0, 0,     // real
+      1, 1, 1, 1,     // imag
+    ]);
+    const input = new Float32Array([1, 2, -3, 4, 5, 6, 7, 8]);
+    const mag = stftMagnitude(input, basis, {
+      kernelSize: 4, stride: 4, inputLength: 8, nFreqs: 1,
+    });
+    // Frame 0 imag sum = 4; Frame 1 = 26
+    expect(Array.from(mag)).toEqual([4, 26]);
   });
 });
