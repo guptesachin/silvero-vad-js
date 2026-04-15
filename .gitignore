@@ -1,5 +1,7 @@
 node_modules/
 weights/*.onnx
 weights/*.bin
+weights/*.manifest.json
 tests/fixtures/golden.json
+captured_frames.json
 .DS_Store

@@ -1,12 +1,13 @@
 import {
-  conv1d, lstmCell, matmul, addBias, relu, sigmoid,
-  reflectPad1d, stftMagnitude,
+  conv1d, lstmCell, matmul, addBias, relu, sigmoid, stftMagnitude,
 } from './ops.js';
 
 // Fixed constants for the 16kHz branch, derived in docs/ARCHITECTURE.md.
 const SR = 16000;
 const FRAME_SAMPLES = 512;
-const PAD = 32;                // reflection pad on each side → 576 samples (STFT out len 3)
+const CONTEXT_SAMPLES = 64;    // prepend last 64 samples from previous frame
+const RIGHT_PAD = 64;          // reflection pad 64 samples on the right (matches ONNX graph)
+const STFT_INPUT_LEN = CONTEXT_SAMPLES + FRAME_SAMPLES + RIGHT_PAD; // 640
 const STFT_KERNEL = 256;
 const STFT_STRIDE = 128;
 const N_FREQS = 129;           // STFT basis has 258 rows = 129 real + 129 imag
@@ -24,10 +25,12 @@ export class SileroVADJS {
     this.w = weights;
     this.h = new Array(HIDDEN).fill(0);  // f64 for recurrence precision
     this.c = new Array(HIDDEN).fill(0);
+    this.context = new Float32Array(CONTEXT_SAMPLES); // zeros on first frame
   }
 
   reset() {
     for (let i = 0; i < HIDDEN; i++) { this.h[i] = 0; this.c[i] = 0; }
+    this.context.fill(0);
   }
 
   /** Packed state (2, 1, 128) matching ORT's `stateN` output layout. */
@@ -43,10 +46,19 @@ export class SileroVADJS {
       throw new Error(`expected ${FRAME_SAMPLES}-sample frame, got ${frame.length}`);
     }
 
-    // 1. Reflect-pad: 512 → 640
-    const padded = reflectPad1d(frame, PAD);
+    // 1. Build the 640-sample STFT input:
+    //    [64 context from last frame][512 new samples][64 right-reflection]
+    //    Matches the ONNX graph's PyTorch ReflectionPad1d(pad=(0,64)) after the
+    //    official OnnxWrapper prepends context.
+    const padded = new Float32Array(STFT_INPUT_LEN);
+    padded.set(this.context, 0);
+    padded.set(frame, CONTEXT_SAMPLES);
+    // Right-reflect the last 64 samples of [context+frame]: for a reflection
+    // that excludes the boundary, index mapping is: padded[N + i] = padded[N - 2 - i].
+    const N = CONTEXT_SAMPLES + FRAME_SAMPLES; // 576
+    for (let i = 0; i < RIGHT_PAD; i++) padded[N + i] = padded[N - 2 - i];
 
-    // 2. STFT magnitude: (576,) → (129, 3)
+    // 2. STFT magnitude: (640,) → (129, 4)
     const stftBasis = this.w['stft.forward_basis_buffer'].data;
     let x = stftMagnitude(padded, stftBasis, {
       kernelSize: STFT_KERNEL,
@@ -56,6 +68,12 @@ export class SileroVADJS {
     });
     let inCh = N_FREQS;
     let inLen = Math.floor((padded.length - STFT_KERNEL) / STFT_STRIDE) + 1;
+
+    // 3. Save last 64 samples of [context + frame] as context for next call.
+    this.context = new Float32Array(CONTEXT_SAMPLES);
+    for (let i = 0; i < CONTEXT_SAMPLES; i++) {
+      this.context[i] = padded[N - CONTEXT_SAMPLES + i];
+    }
 
     // 3–6. Encoder: four Conv1D→ReLU layers.
     const enc = [

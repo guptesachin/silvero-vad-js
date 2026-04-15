@@ -37,26 +37,25 @@ def make_frames() -> list[np.ndarray]:
 
 
 def main() -> None:
-    sess = ort.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
-    input_names = [i.name for i in sess.get_inputs()]
-    assert set(input_names) == {"input", "state", "sr"}, f"unexpected inputs: {input_names}"
+    # Use the OFFICIAL wrapper so context-prepending matches production usage.
+    import torch
+    from silero_vad import load_silero_vad
+    model = load_silero_vad(onnx=True)
+    model.reset_states()
 
-    state = np.zeros(STATE_SHAPE, dtype=np.float32)
-    sr = np.array(SR, dtype=np.int64)
     out = {"sr": SR, "win": WIN, "tolerance": 1e-4, "frames": []}
-
     for frame in make_frames():
-        x = frame.reshape(1, WIN).astype(np.float32)
-        state_in = state.copy()
-        outputs = sess.run(None, {"input": x, "state": state, "sr": sr})
-        prob, new_state = outputs[0], outputs[1]
+        x = torch.from_numpy(frame.reshape(1, WIN).astype(np.float32))
+        # Capture state BEFORE the call (the wrapper updates it during __call__).
+        state_in = model._state.numpy().copy()
+        prob = float(model(x, SR).item())
+        state_out = model._state.numpy().copy()
         out["frames"].append({
             "input": frame.tolist(),
             "state_in": state_in.flatten().tolist(),
-            "speech_prob": float(prob.flatten()[0]),
-            "state_out": new_state.flatten().tolist(),
+            "speech_prob": prob,
+            "state_out": state_out.flatten().tolist(),
         })
-        state = new_state
 
     Path(OUT_PATH).parent.mkdir(parents=True, exist_ok=True)
     Path(OUT_PATH).write_text(json.dumps(out))

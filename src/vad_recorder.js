@@ -86,18 +86,50 @@ export class VADRecorder extends EventTarget {
         noiseSuppression: true,
       },
     });
+    const track = this.stream.getAudioTracks()[0];
+    const settings = track.getSettings();
+    this.dispatchEvent(new CustomEvent('diag', { detail: {
+      type: 'diag', quanta: 0, framesOut: 0, hasInput: true, inputLen: 0,
+      note: `track sampleRate=${settings.sampleRate}, channels=${settings.channelCount}, device=${settings.deviceId?.slice(0,8)}`,
+    }}));
     this.audioContext = new AudioContext({ sampleRate: 16000 });
+    if (this.audioContext.sampleRate !== 16000) {
+      throw new Error(
+        `AudioContext ran at ${this.audioContext.sampleRate}Hz instead of 16000Hz. ` +
+        `The browser did not honor the requested rate. VAD requires 16kHz input.`
+      );
+    }
     await this.audioContext.audioWorklet.addModule(this.workletUrl);
 
     const source = this.audioContext.createMediaStreamSource(this.stream);
     const node = new AudioWorkletNode(this.audioContext, 'vad-processor');
-    node.port.onmessage = (e) => this._onFrame(e.data);
+    node.port.onmessage = (e) => {
+      const msg = e.data;
+      if (msg?.type === 'frame') this._onFrame(msg.frame);
+      else if (msg?.type === 'diag') {
+        this.dispatchEvent(new CustomEvent('diag', { detail: msg }));
+      } else if (msg?.type === 'amp') {
+        this.dispatchEvent(new CustomEvent('amp', { detail: msg }));
+      }
+    };
     source.connect(node);
-    // Intentionally not connecting node to destination — we don't want mic passthrough.
+    // Chrome/Safari may ignore AudioContext sampleRate unless the node is in
+    // the audio graph — connecting to destination is the safe way. We use a
+    // GainNode at 0 to avoid echoing the mic back to the speaker.
+    const mute = this.audioContext.createGain();
+    mute.gain.value = 0;
+    node.connect(mute).connect(this.audioContext.destination);
   }
 
   _onFrame(frame) {
-    const prob = this.vad.process(frame);
+    let prob;
+    try {
+      prob = this.vad.process(frame);
+    } catch (err) {
+      this.dispatchEvent(new CustomEvent('error', { detail: { err } }));
+      console.error('VAD process error:', err);
+      return;
+    }
     const { event } = this.stateMachine.feed(prob);
     if (event === 'speech-start') {
       this.audioChunks = [frame];

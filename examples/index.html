@@ -52,6 +52,9 @@
       const sec = (e.detail.audio.length / e.detail.sampleRate).toFixed(2);
       log(`🛑 speech ended — ${e.detail.audio.length} samples (${sec}s)`);
     });
+    recorder.addEventListener('error', (e) => {
+      log('VAD error: ' + (e.detail?.err?.message ?? e.detail));
+    });
 
     document.getElementById('start').onclick = async () => {
       try {

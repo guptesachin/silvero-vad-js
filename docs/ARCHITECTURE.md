@@ -20,10 +20,15 @@ Root graph has only 5 nodes: a `Constant(16000)`, an `Equal(sr, 16000)`, then a 
 
 Weights are stored as `Constant` nodes *inside* the subgraph (not top-level initializers). The JS engine loads them from our exported `.bin` under their logical names (the `If_0_then_branch__Inline_0__` prefix is stripped at export time).
 
-### 1. Reflect-pad the input
+### 1. Build the 640-sample STFT input
 
-Symmetric reflection pad of **32** samples on each side: (N, 512) → (N, 576).
-(Nodes 16–33 in then_branch implement this via `Pad` with a dynamically-built pads tensor. Verified empirically: ORT's post-pad output is (N, 576), and STFT output has 3 time frames = `(576 − 256) / 128 + 1`. We hardcode `pad = 32` in the JS implementation since we only support 16kHz 512-sample frames.)
+The model expects **576 samples** to reach its input tensor: 64 samples of audio context from the **previous** frame prepended to the current 512-sample frame. This context is the last 64 samples of `[prev_context + prev_frame]`. On the first call the context is zeros.
+
+The ONNX graph then applies **PyTorch `ReflectionPad1d(pad=(0, 64))`** — a 64-sample reflection on the *right side only* (matches `padded[N + i] = padded[N - 2 - i]`). Final tensor fed to the STFT Conv is **(N, 640)**.
+
+In the JS port we don't call into ONNX's pad; we build the 640-sample tensor directly: `[64 context from last frame][512 new samples][64 right-reflection]`. After each call we save the last 64 of `[context + frame]` for the next call.
+
+This is the #1 thing to get right. We originally (incorrectly) interpreted the pad as symmetric-32-on-each-side from a single 512 input, which produced STFT output of 3 time frames instead of 4 and silently broke speech detection on real audio (while still matching ORT's frame-by-frame output in the equally-broken regime — our first golden fixture validated the wrong behavior).
 
 ### 2. STFT via fixed-weight Conv1D
 
@@ -31,7 +36,7 @@ Symmetric reflection pad of **32** samples on each side: (N, 512) → (N, 576).
 |---|---|---|---|
 | Conv1D | `stft.forward_basis_buffer` | (258, 1, 256) | kernel=256, stride=128, pad=0 |
 
-Input: (N, 1, 576). Output: (N, 258, 3). Rows 0–128 = real parts of 129 frequency bins; rows 129–257 = imag parts. (Output length = (576 − 256) / 128 + 1 = **3 time frames**.)
+Input: (N, 1, 640). Output: (N, 258, 4). Rows 0–128 = real parts of 129 frequency bins; rows 129–257 = imag parts. (Output length = (640 − 256) / 128 + 1 = **4 time frames**.)
 
 ### 3. Magnitude
 
@@ -41,18 +46,18 @@ Split the 258 channels into real (0..128) and imag (129..257), square-and-add, s
 mag[:, f, t] = sqrt(real[:, f, t]^2 + imag[:, f, t]^2)     f in 0..128
 ```
 
-Output: (N, 129, 3).
+Output: (N, 129, 4).
 
 ### 4. Encoder (four ReLU-convs)
 
 | # | Weight name | Weight shape | Bias shape | Stride | Pad | Output length |
 |---|---|---|---|---|---|---|
-| 0 | `encoder.0.reparam_conv.weight` | (128, 129, 3) | (128,) | 1 | 1 | 3 |
+| 0 | `encoder.0.reparam_conv.weight` | (128, 129, 3) | (128,) | 1 | 1 | 4 |
 | 1 | `encoder.1.reparam_conv.weight` | (64, 128, 3) | (64,) | 2 | 1 | 2 |
 | 2 | `encoder.2.reparam_conv.weight` | (64, 64, 3) | (64,) | 2 | 1 | 1 |
 | 3 | `encoder.3.reparam_conv.weight` | (128, 64, 3) | (128,) | 1 | 1 | 1 |
 
-Each followed by ReLU. Final shape: **(N, 128, 1)** — a single 128-dim feature vector per frame. (Length math: 3 → 2 → 1 → 1 with kernel=3, pad=1 at each stride.)
+Each followed by ReLU. Final shape: **(N, 128, 1)** — a single 128-dim feature vector per frame. (Length math: 4 → 2 → 1 → 1 with kernel=3, pad=1 at each stride.)
 
 ### 5. LSTM cell (single timestep per frame)
 
@@ -106,4 +111,4 @@ The STFT is implemented as a Conv1D with a pre-computed basis buffer (rows 0..12
 
 ## Numerical notes
 
-JS per-frame probability matches ORT's within **1e-4** on all 10 golden fixture frames. Internal LSTM state, however, can drift by ~0.13 over 10 threaded frames. This is because the decoder head is saturating enough to collapse state differences into near-identical probabilities. For VAD decisions this is inconsequential — the speech/silence threshold is crossed on the same frames — but it's a known asymmetry between JS and ORT that's worth knowing if you ever debug against ORT's state output directly.
+JS per-frame probability matches the official `silero-vad` Python wrapper within **1e-4** on all 10 golden fixture frames and on 100 captured mic frames (76 speech frames detected, identical to the wrapper). The golden fixtures were regenerated using the official `OnnxWrapper` rather than feeding the raw ONNX model — the wrapper's context-prepending + internal pad flow is what production usage requires.
