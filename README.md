@@ -1,10 +1,10 @@
 # silvero-vad-js
 
-Pure-JavaScript SileroVAD v5 inference engine. Runs in iOS Safari, where ONNX Runtime WASM has been broken since iOS 16.4+. Matches the official `silero-vad` Python wrapper's output frame-by-frame.
+Pure-JavaScript SileroVAD v5 inference engine. No WASM, no ONNX Runtime — runs on all browsers with `AudioWorklet` support. Matches the official `silero-vad` Python wrapper's output frame-by-frame.
 
 ## Why this exists
 
-ONNX Runtime WASM hangs on iOS Safari, which means every JS SileroVAD library that depends on onnxruntime-web (`ricky0123/vad`, etc.) silently breaks on iPhones. Our students kept having to fall back to hold-and-release recording, which garbles long answers. This engine reimplements the model's forward pass in vanilla JS — no WASM, no ONNX Runtime, works everywhere `AudioWorklet` does.
+Every JS SileroVAD library depends on `onnxruntime-web` (WASM). That works on most browsers, but ONNX Runtime WASM has been broken on iOS Safari since iOS 16.4+, silently failing on iPhones. This engine reimplements the model's forward pass in vanilla JS — no WASM dependency at all — so it works everywhere: Chrome, Firefox, Safari (desktop and iOS), and any browser that supports AudioWorklet.
 
 ## Quickstart
 
