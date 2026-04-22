@@ -133,6 +133,12 @@ npm run demo       # http://localhost:8000/examples/index.html
 
 All primitive ops (`src/ops.js`) are pure functions with unit tests. The integration test (`tests/silero_vad.test.js`) validates the forward pass against the official `silero-vad` Python wrapper output within 1e-4 per frame.
 
+## Security / supply chain note
+
+Socket.dev flags this package for "network access" because `weights_loader.js` uses `fetch()` to load the model weights at runtime. These requests go to **URLs you provide** (your own static files on your own server) — there are no hardcoded external endpoints, no telemetry, and no outbound calls. This is the same pattern used by `pdfjs-dist`, `sql.js`, and other packages that load static assets at runtime.
+
+If you prefer to avoid the `fetch()` path entirely, use `loadWeightsFromBuffers(arrayBuffer, manifest)` and supply the data yourself.
+
 ## License
 
 MIT (matches the SileroVAD model license).
