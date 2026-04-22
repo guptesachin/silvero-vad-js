@@ -9,7 +9,7 @@ Every JS SileroVAD library depends on `onnxruntime-web` (WASM). That works on mo
 ## Install
 
 ```bash
-npm install silvero-vad-js
+npm install @jorastechnologies/silvero-vad-js
 ```
 
 ## Setup
@@ -17,9 +17,9 @@ npm install silvero-vad-js
 Copy the runtime assets to your app's public/static directory:
 
 ```bash
-cp node_modules/silvero-vad-js/weights/silero_vad_v5.bin      public/vad/
-cp node_modules/silvero-vad-js/weights/silero_vad_v5.manifest.json public/vad/
-cp node_modules/silvero-vad-js/src/vad_processor.js            public/vad/
+cp node_modules/@jorastechnologies/silvero-vad-js/weights/silero_vad_v5.bin      public/vad/
+cp node_modules/@jorastechnologies/silvero-vad-js/weights/silero_vad_v5.manifest.json public/vad/
+cp node_modules/@jorastechnologies/silvero-vad-js/src/vad_processor.js            public/vad/
 ```
 
 The weight files (~1.2 MB) and AudioWorklet script must be served as static files — they are fetched by the browser at runtime and cannot be inlined into a JS bundle.
@@ -27,7 +27,7 @@ The weight files (~1.2 MB) and AudioWorklet script must be served as static file
 ## Usage
 
 ```javascript
-import { VADRecorder } from 'silvero-vad-js';
+import { VADRecorder } from '@jorastechnologies/silvero-vad-js';
 
 const rec = new VADRecorder({
   weightsBinUrl:      '/vad/silero_vad_v5.bin',
@@ -62,9 +62,9 @@ your-flask-app/static/vad/
 Deploy script:
 
 ```bash
-cp node_modules/silvero-vad-js/src/*.js                        your-flask-app/static/vad/
-cp node_modules/silvero-vad-js/weights/silero_vad_v5.bin       your-flask-app/static/vad/
-cp node_modules/silvero-vad-js/weights/silero_vad_v5.manifest.json your-flask-app/static/vad/
+cp node_modules/@jorastechnologies/silvero-vad-js/src/*.js                        your-flask-app/static/vad/
+cp node_modules/@jorastechnologies/silvero-vad-js/weights/silero_vad_v5.bin       your-flask-app/static/vad/
+cp node_modules/@jorastechnologies/silvero-vad-js/weights/silero_vad_v5.manifest.json your-flask-app/static/vad/
 ```
 
 Template snippet:

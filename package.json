@@ -1,5 +1,5 @@
 {
-  "name": "silvero-vad-js",
+  "name": "@jorastechnologies/silvero-vad-js",
   "version": "0.1.0",
   "description": "Pure-JS voice activity detection (SileroVAD v5) — no WASM, no ONNX Runtime, works on iOS Safari",
   "type": "module",
