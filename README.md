@@ -6,31 +6,33 @@ Pure-JavaScript SileroVAD v5 inference engine. No WASM, no ONNX Runtime — runs
 
 Every JS SileroVAD library depends on `onnxruntime-web` (WASM). That works on most browsers, but ONNX Runtime WASM has been broken on iOS Safari since iOS 16.4+, silently failing on iPhones. This engine reimplements the model's forward pass in vanilla JS — no WASM dependency at all — so it works everywhere: Chrome, Firefox, Safari (desktop and iOS), and any browser that supports AudioWorklet.
 
-## Quickstart
+## Install
 
 ```bash
-npm install
-python3 -m pip install -r scripts/requirements.txt
-
-# One-time setup: model + weights + golden test fixtures
-curl -L -o weights/silero_vad_v5.onnx \
-  https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx
-npm run weights:export
-npm run weights:golden
-
-npm test      # 28 pass
-npm run demo  # http://localhost:8000/examples/index.html
+npm install silvero-vad-js
 ```
 
-## Browser usage
+## Setup
+
+Copy the runtime assets to your app's public/static directory:
+
+```bash
+cp node_modules/silvero-vad-js/weights/silero_vad_v5.bin      public/vad/
+cp node_modules/silvero-vad-js/weights/silero_vad_v5.manifest.json public/vad/
+cp node_modules/silvero-vad-js/src/vad_processor.js            public/vad/
+```
+
+The weight files (~1.2 MB) and AudioWorklet script must be served as static files — they are fetched by the browser at runtime and cannot be inlined into a JS bundle.
+
+## Usage
 
 ```javascript
 import { VADRecorder } from 'silvero-vad-js';
 
 const rec = new VADRecorder({
-  weightsBinUrl:      '/static/silero_vad_v5.bin',
-  weightsManifestUrl: '/static/silero_vad_v5.manifest.json',
-  workletUrl:         '/static/vad_processor.js',
+  weightsBinUrl:      '/vad/silero_vad_v5.bin',
+  weightsManifestUrl: '/vad/silero_vad_v5.manifest.json',
+  workletUrl:         '/vad/vad_processor.js',
   threshold: 0.5,
   silenceMs: 480,
 });
@@ -57,12 +59,12 @@ your-flask-app/static/vad/
 └── index.js
 ```
 
-Deploy script (runs on EC2 after `git pull` of this repo):
+Deploy script:
 
 ```bash
-cp silvero-vad-js/src/*.js  your-flask-app/static/vad/
-cp silvero-vad-js/weights/silero_vad_v5.bin           your-flask-app/static/vad/
-cp silvero-vad-js/weights/silero_vad_v5.manifest.json your-flask-app/static/vad/
+cp node_modules/silvero-vad-js/src/*.js                        your-flask-app/static/vad/
+cp node_modules/silvero-vad-js/weights/silero_vad_v5.bin       your-flask-app/static/vad/
+cp node_modules/silvero-vad-js/weights/silero_vad_v5.manifest.json your-flask-app/static/vad/
 ```
 
 Template snippet:
@@ -111,11 +113,22 @@ The engine ignores the 8kHz path in the ONNX graph and implements only the 16kHz
 
 ## Development
 
+Contributing or regenerating weights from the ONNX source:
+
 ```bash
-npm test           # run all tests
+git clone <repo-url> && cd silvero-vad-js
+npm install
+python3 -m pip install -r scripts/requirements.txt
+
+# One-time: download ONNX model + generate weights + golden fixtures
+curl -L -o weights/silero_vad_v5.onnx \
+  https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx
+npm run weights:export
+npm run weights:golden
+
+npm test           # run all tests (28 pass)
 npm run test:watch # TDD
-npm run weights:export  # regenerate weights bin + manifest from .onnx
-npm run weights:golden  # regenerate test fixtures using the official Python wrapper
+npm run demo       # http://localhost:8000/examples/index.html
 ```
 
 All primitive ops (`src/ops.js`) are pure functions with unit tests. The integration test (`tests/silero_vad.test.js`) validates the forward pass against the official `silero-vad` Python wrapper output within 1e-4 per frame.

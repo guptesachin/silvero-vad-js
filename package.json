@@ -1,9 +1,28 @@
 {
   "name": "silvero-vad-js",
   "version": "0.1.0",
-  "description": "Pure-JS SileroVAD inference engine for iOS Safari",
+  "description": "Pure-JS voice activity detection (SileroVAD v5) — no WASM, no ONNX Runtime, works on iOS Safari",
   "type": "module",
   "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src/",
+    "weights/silero_vad_v5.bin",
+    "weights/silero_vad_v5.manifest.json"
+  ],
+  "keywords": [
+    "vad",
+    "voice-activity-detection",
+    "silero",
+    "speech",
+    "audio",
+    "ios-safari",
+    "audioworklet",
+    "webrtc",
+    "microphone"
+  ],
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
@@ -13,6 +32,14 @@
   },
   "devDependencies": {
     "vitest": "^4.1.4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guptesachin/silvero-vad-js.git"
+  },
+  "homepage": "https://github.com/guptesachin/silvero-vad-js#readme",
+  "bugs": {
+    "url": "https://github.com/guptesachin/silvero-vad-js/issues"
   },
   "license": "MIT"
 }
