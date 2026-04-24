@@ -5,8 +5,8 @@ Replace ONNX Runtime WASM dependency with a pure JavaScript inference engine tha
 
 ## Why
 - ONNX Runtime WASM does not work on iOS Safari (WASM-SIMD broken since iOS 16.4+)
-- QuizVidya students on iPhones cannot use Voice Activity Detection
-- Students fall back to hold-and-release mode, causing fatigue and garbled recordings in long sessions
+- Users on iPhones cannot use Voice Activity Detection
+- Users fall back to hold-and-release mode, causing fatigue and garbled recordings in long sessions
 - This is the #1 cause of false STT failures
 
 ## SileroVAD Model Details
